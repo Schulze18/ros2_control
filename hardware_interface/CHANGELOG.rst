@@ -2,6 +2,37 @@
 Changelog for package hardware_interface
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.10.0 (2022-06-18)
+-------------------
+* Make RHEL CI happy! (`#730 <https://github.com/ros-controls/ros2_control/issues/730>`_)
+* CMakeLists cleanup (`#733 <https://github.com/ros-controls/ros2_control/issues/733>`_)
+* Refactored error handling when hardware name is duplicated (`#724 <https://github.com/ros-controls/ros2_control/issues/724>`_)
+* Update to clang format 12 (`#731 <https://github.com/ros-controls/ros2_control/issues/731>`_)
+* Contributors: Andy Zelenak, Bence Magyar, Kvk Praneeth, Márk Szitanics
+
+2.9.0 (2022-05-19)
+------------------
+* Resource Manager extension to support management of reference interfaces from chained controllers. (`#664 <https://github.com/ros-controls/ros2_control/issues/664>`_)
+  * Extend resource manager to manage reference interfaces from controllers.
+  * Adjust interface between CM and RM for managing controllers' reference interfaces.
+* Contributors: Denis Štogl
+
+2.8.0 (2022-05-13)
+------------------
+* Pass time and period to read() and write() (`#715 <https://github.com/ros-controls/ros2_control/issues/715>`_)
+* Contributors: Bence Magyar
+
+2.7.0 (2022-04-29)
+------------------
+* Make URDF available to HW components on initialize (`#709 <https://github.com/ros-controls/ros2_control/issues/709>`_)
+* Contributors: Bence Magyar
+
+2.6.0 (2022-04-20)
+------------------
+* Error if a hardware name is duplicated (`#672 <https://github.com/ros-controls/ros2_control/issues/672>`_)
+* Port four bar linkage and differential transmission loaders from ROS1 (`#656 <https://github.com/ros-controls/ros2_control/issues/656>`_)
+* Contributors: Andy Zelenak, Márk Szitanics
+
 2.5.0 (2022-03-25)
 ------------------
 * Require lifecycle-msgs in hardware_interface package (`#675 <https://github.com/ros-controls/ros2_control/issues/675>`_) (`#678 <https://github.com/ros-controls/ros2_control/issues/678>`_)

@@ -40,28 +40,29 @@ namespace hardware_interface
 auto trigger_and_print_hardware_state_transition =
   [](
     auto transition, const std::string transition_name, const std::string & hardware_name,
-    const lifecycle_msgs::msg::State::_id_type & target_state) {
+    const lifecycle_msgs::msg::State::_id_type & target_state)
+{
+  RCUTILS_LOG_INFO_NAMED(
+    "resource_manager", "'%s' hardware '%s' ", transition_name.c_str(), hardware_name.c_str());
+
+  const rclcpp_lifecycle::State new_state = transition();
+
+  bool result = new_state.id() == target_state;
+
+  if (result)
+  {
     RCUTILS_LOG_INFO_NAMED(
-      "resource_manager", "'%s' hardware '%s' ", transition_name.c_str(), hardware_name.c_str());
-
-    const rclcpp_lifecycle::State new_state = transition();
-
-    bool result = new_state.id() == target_state;
-
-    if (result)
-    {
-      RCUTILS_LOG_INFO_NAMED(
-        "resource_manager", "Successful '%s' of hardware '%s'", transition_name.c_str(),
-        hardware_name.c_str());
-    }
-    else
-    {
-      RCUTILS_LOG_INFO_NAMED(
-        "resource_manager", "Failed to '%s' hardware '%s'", transition_name.c_str(),
-        hardware_name.c_str());
-    }
-    return result;
-  };
+      "resource_manager", "Successful '%s' of hardware '%s'", transition_name.c_str(),
+      hardware_name.c_str());
+  }
+  else
+  {
+    RCUTILS_LOG_INFO_NAMED(
+      "resource_manager", "Failed to '%s' hardware '%s'", transition_name.c_str(),
+      hardware_name.c_str());
+  }
+  return result;
+};
 
 class ResourceStorage
 {
@@ -98,6 +99,7 @@ public:
     component_info.name = hardware_info.name;
     component_info.type = hardware_info.type;
     component_info.class_type = hardware_info.hardware_class_type;
+
     hardware_info_map_.insert(std::make_pair(component_info.name, component_info));
   }
 
@@ -139,7 +141,6 @@ public:
       // happened and only then trigger this part of the code?
       // On the other side this part of the code should never be executed in real-time critical
       // thread, so it could be also OK as it is...
-      // @bmagyar what do you think?
       for (const auto & interface : hardware_info_map_[hardware.get_name()].state_interfaces)
       {
         // add all state interfaces to available list
@@ -213,7 +214,8 @@ public:
         {
           available_command_interfaces_.erase(found_it);
           RCUTILS_LOG_DEBUG_NAMED(
-            "resource_manager", "(hardware '%s'): '%s' command removed from available list",
+            "resource_manager",
+            "(hardware '%s'): '%s' command interface removed from available list",
             hardware.get_name().c_str(), interface.c_str());
         }
         else
@@ -267,6 +269,7 @@ public:
       // TODO(destogl): change this - deimport all things if there is there are interfaces there
       // deimport_non_movement_command_interfaces(hardware);
       // deimport_state_interfaces(hardware);
+      // use remove_command_interfaces(hardware);
     }
     return result;
   }
@@ -421,6 +424,22 @@ public:
   void import_command_interfaces(HardwareT & hardware)
   {
     auto interfaces = hardware.export_command_interfaces();
+    hardware_info_map_[hardware.get_name()].command_interfaces = add_command_interfaces(interfaces);
+  }
+
+  /// Adds exported command interfaces into internal storage.
+  /**
+   * Add command interfaces to the internal storage. Command interfaces exported from hardware or
+   * chainable controllers are moved to the map with name-interface pairs, the interface names are
+   * added to the claimed map and available list's size is increased to reserve storage when
+   * interface change theirs status in real-time control loop.
+   *
+   * \param[interfaces] list of command interface to add into storage.
+   * \returns list of interface names that are added into internal storage. The output is used to
+   * avoid additional iterations to cache interface names, e.g., for initializing info structures.
+   */
+  std::vector<std::string> add_command_interfaces(std::vector<CommandInterface> & interfaces)
+  {
     std::vector<std::string> interface_names;
     interface_names.reserve(interfaces.size());
     for (auto & interface : interfaces)
@@ -430,29 +449,59 @@ public:
       claimed_command_interface_map_.emplace(std::make_pair(key, false));
       interface_names.push_back(key);
     }
-    hardware_info_map_[hardware.get_name()].command_interfaces = interface_names;
     available_command_interfaces_.reserve(
       available_command_interfaces_.capacity() + interface_names.size());
+
+    return interface_names;
+  }
+
+  /// Removes command interfaces from internal storage.
+  /**
+   * Command interface are removed from the maps with theirs storage and their claimed status.
+   *
+   * \param[interface_names] list of command interface names to remove from storage.
+   */
+  void remove_command_interfaces(const std::vector<std::string> & interface_names)
+  {
+    for (const auto & interface : interface_names)
+    {
+      command_interface_map_.erase(interface);
+      claimed_command_interface_map_.erase(interface);
+    }
+  }
+
+  void check_for_duplicates(const HardwareInfo & hardware_info)
+  {
+    // Check for identical names
+    if (hardware_info_map_.find(hardware_info.name) != hardware_info_map_.end())
+    {
+      throw std::runtime_error(
+        "Hardware name " + hardware_info.name +
+        " is duplicated. Please provide a unique 'name' in the URDF.");
+    }
   }
 
   // TODO(destogl): Propagate "false" up, if happens in initialize_hardware
-  void initialize_actuator(const HardwareInfo & hardware_info)
+  void load_and_initialize_actuator(const HardwareInfo & hardware_info)
   {
+    check_for_duplicates(hardware_info);
     load_hardware<Actuator, ActuatorInterface>(hardware_info, actuator_loader_, actuators_);
     initialize_hardware(hardware_info, actuators_.back());
     import_state_interfaces(actuators_.back());
     import_command_interfaces(actuators_.back());
   }
 
-  void initialize_sensor(const HardwareInfo & hardware_info)
+  void load_and_initialize_sensor(const HardwareInfo & hardware_info)
   {
+    check_for_duplicates(hardware_info);
     load_hardware<Sensor, SensorInterface>(hardware_info, sensor_loader_, sensors_);
     initialize_hardware(hardware_info, sensors_.back());
     import_state_interfaces(sensors_.back());
   }
 
-  void initialize_system(const HardwareInfo & hardware_info)
+  void load_and_initialize_system(const HardwareInfo & hardware_info)
   {
+    check_for_duplicates(hardware_info);
     load_hardware<System, SystemInterface>(hardware_info, system_loader_, systems_);
     initialize_hardware(hardware_info, systems_.back());
     import_state_interfaces(systems_.back());
@@ -495,6 +544,8 @@ public:
   std::vector<System> systems_;
 
   std::unordered_map<std::string, HardwareComponentInfo> hardware_info_map_;
+
+  std::unordered_map<std::string, std::vector<std::string>> controllers_reference_interfaces_map_;
 
   /// Storage of all available state interfaces
   std::map<std::string, StateInterface> state_interface_map_;
@@ -543,18 +594,18 @@ void ResourceManager::load_urdf(const std::string & urdf, bool validate_interfac
     {
       std::lock_guard<std::recursive_mutex> guard(resource_interfaces_lock_);
       std::lock_guard<std::recursive_mutex> guard_claimed(claimed_command_interfaces_lock_);
-      resource_storage_->initialize_actuator(individual_hardware_info);
+      resource_storage_->load_and_initialize_actuator(individual_hardware_info);
     }
     if (individual_hardware_info.type == sensor_type)
     {
       std::lock_guard<std::recursive_mutex> guard(resource_interfaces_lock_);
-      resource_storage_->initialize_sensor(individual_hardware_info);
+      resource_storage_->load_and_initialize_sensor(individual_hardware_info);
     }
     if (individual_hardware_info.type == system_type)
     {
       std::lock_guard<std::recursive_mutex> guard(resource_interfaces_lock_);
       std::lock_guard<std::recursive_mutex> guard_claimed(claimed_command_interfaces_lock_);
-      resource_storage_->initialize_system(individual_hardware_info);
+      resource_storage_->load_and_initialize_system(individual_hardware_info);
     }
   }
 
@@ -589,6 +640,7 @@ std::vector<std::string> ResourceManager::state_interface_keys() const
 
 std::vector<std::string> ResourceManager::available_state_interfaces() const
 {
+  std::lock_guard<std::recursive_mutex> guard(resource_interfaces_lock_);
   return resource_storage_->available_state_interfaces_;
 }
 
@@ -608,7 +660,66 @@ bool ResourceManager::state_interface_is_available(const std::string & name) con
            name) != resource_storage_->available_state_interfaces_.end();
 }
 
-// CM API
+void ResourceManager::import_controller_reference_interfaces(
+  const std::string & controller_name, std::vector<CommandInterface> & interfaces)
+{
+  std::lock_guard<std::recursive_mutex> guard(resource_interfaces_lock_);
+  std::lock_guard<std::recursive_mutex> guard_claimed(claimed_command_interfaces_lock_);
+  auto interface_names = resource_storage_->add_command_interfaces(interfaces);
+  resource_storage_->controllers_reference_interfaces_map_[controller_name] = interface_names;
+}
+
+std::vector<std::string> ResourceManager::get_controller_reference_interface_names(
+  const std::string & controller_name)
+{
+  return resource_storage_->controllers_reference_interfaces_map_.at(controller_name);
+}
+
+void ResourceManager::make_controller_reference_interfaces_available(
+  const std::string & controller_name)
+{
+  auto interface_names =
+    resource_storage_->controllers_reference_interfaces_map_.at(controller_name);
+  std::lock_guard<std::recursive_mutex> guard(resource_interfaces_lock_);
+  resource_storage_->available_command_interfaces_.insert(
+    resource_storage_->available_command_interfaces_.end(), interface_names.begin(),
+    interface_names.end());
+}
+
+void ResourceManager::make_controller_reference_interfaces_unavailable(
+  const std::string & controller_name)
+{
+  auto interface_names =
+    resource_storage_->controllers_reference_interfaces_map_.at(controller_name);
+
+  std::lock_guard<std::recursive_mutex> guard(resource_interfaces_lock_);
+  for (const auto & interface : interface_names)
+  {
+    auto found_it = std::find(
+      resource_storage_->available_command_interfaces_.begin(),
+      resource_storage_->available_command_interfaces_.end(), interface);
+    if (found_it != resource_storage_->available_command_interfaces_.end())
+    {
+      resource_storage_->available_command_interfaces_.erase(found_it);
+      RCUTILS_LOG_DEBUG_NAMED(
+        "resource_manager", "'%s' command interface removed from available list",
+        interface.c_str());
+    }
+  }
+}
+
+void ResourceManager::remove_controller_reference_interfaces(const std::string & controller_name)
+{
+  auto interface_names =
+    resource_storage_->controllers_reference_interfaces_map_.at(controller_name);
+  resource_storage_->controllers_reference_interfaces_map_.erase(controller_name);
+
+  std::lock_guard<std::recursive_mutex> guard(resource_interfaces_lock_);
+  std::lock_guard<std::recursive_mutex> guard_claimed(claimed_command_interfaces_lock_);
+  resource_storage_->remove_command_interfaces(interface_names);
+}
+
+// CM API: Called in "update"-thread
 bool ResourceManager::command_interface_is_claimed(const std::string & key) const
 {
   if (!command_interface_is_available(key))
@@ -739,7 +850,8 @@ bool ResourceManager::prepare_command_mode_switch(
   const std::vector<std::string> & start_interfaces,
   const std::vector<std::string> & stop_interfaces)
 {
-  auto interfaces_to_string = [&]() {
+  auto interfaces_to_string = [&]()
+  {
     std::stringstream ss;
     ss << "Start interfaces: " << std::endl << "[" << std::endl;
     for (const auto & start_if : start_interfaces)
@@ -849,7 +961,8 @@ return_type ResourceManager::set_component_state(
     }
   }
 
-  auto find_set_component_state = [&](auto action, auto & components) {
+  auto find_set_component_state = [&](auto action, auto & components)
+  {
     auto found_component_it = std::find_if(
       components.begin(), components.end(),
       [&](const auto & component) { return component.get_name() == component_name; });
@@ -888,31 +1001,31 @@ return_type ResourceManager::set_component_state(
   return result;
 }
 
-void ResourceManager::read()
+void ResourceManager::read(const rclcpp::Time & time, const rclcpp::Duration & period)
 {
   for (auto & component : resource_storage_->actuators_)
   {
-    component.read();
+    component.read(time, period);
   }
   for (auto & component : resource_storage_->sensors_)
   {
-    component.read();
+    component.read(time, period);
   }
   for (auto & component : resource_storage_->systems_)
   {
-    component.read();
+    component.read(time, period);
   }
 }
 
-void ResourceManager::write()
+void ResourceManager::write(const rclcpp::Time & time, const rclcpp::Duration & period)
 {
   for (auto & component : resource_storage_->actuators_)
   {
-    component.write();
+    component.write(time, period);
   }
   for (auto & component : resource_storage_->systems_)
   {
-    component.write();
+    component.write(time, period);
   }
 }
 
